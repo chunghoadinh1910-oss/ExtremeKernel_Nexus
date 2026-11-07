@@ -1,219 +1,103 @@
-name: Kernel Build Workflow
+name: Kernel Build - SukiSU Ultra (D2XKS)
 
 on:
-  workflow_dispatch:
-    inputs:
-      model:
-        description: "Model to build (leave empty to build all)"
-        required: false
-        default: "all"
-        type: choice
-        options:
-        - all
-        - d1
-        - d1xks
-        - d2s
-        - d2x
-        - d2xks
+  workflow_dispatch: # Cho phép bạn bấm chạy thủ công
 
 jobs:
-  setup:
+  build:
     runs-on: ubuntu-latest
-    outputs:
-      should_build_all: ${{ github.event.inputs.model == 'all' }}
+    
     steps:
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y git-core gnupg flex bison build-essential zip curl zlib1g-dev libc6-dev-i386 x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig
-      - name: Set should_build_all output
-        run: echo "should_build_all=${{ github.event.inputs.model == 'all' }}" >> $GITHUB_OUTPUT
+    - name: Checkout Source Code
+      uses: actions/checkout@v4
+      with:
+        submodules: 'recursive'
 
-  # ... (Giữ nguyên các job build_d1, build_d1xks, build_d2s, build_d2x) ...
-  build_d1:
-    needs: setup
-    runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.model == 'd1' || needs.setup.outputs.should_build_all == 'true' }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
-      - name: Update submodules
-        run: |
-          git submodule update --init --recursive
-          git submodule update --remote
-      - name: Build for d1
-        run: ./workflows.sh -m d1 -k Y -r N
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ExtremeKRNL-Nexus-d1
-          path: build/out/d1/zip
+    - name: Update submodules
+      run: |
+        git submodule update --init --recursive
+        git submodule update --remote
 
-  build_d1xks:
-    needs: setup
-    runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.model == 'd1xks' || needs.setup.outputs.should_build_all == 'true' }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
-      - name: Update submodules
-        run: |
-          git submodule update --init --recursive
-          git submodule update --remote
-      - name: Build for d1xks
-        run: ./workflows.sh -m d1xks -k Y -r N
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ExtremeKRNL-Nexus-d1xks
-          path: build/out/d1xks/zip
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev \
+        zip unzip python3 git wget curl cpio kmod rsync \
+        device-tree-compiler gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+        automake libtool lzop gperf zlib1g-dev libxml2-utils bzip2 \
+        libbz2-dev squashfs-tools pngcrush schedtool dpkg-dev lz4
 
-  build_d2s:
-    needs: setup
-    runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.model == 'd2s' || needs.setup.outputs.should_build_all == 'true' }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
-          token: ${{ secrets.FCK_SUBMODULES }}
-      - name: Update submodules
-        run: |
-          git submodule sync --recursive
-          git submodule update --init --force --recursive --remote
-      - name: Build for d2s
-        run: ./workflows.sh -m d2s -k Y -r N
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ExtremeKRNL-Nexus-d2s
-          path: build/out/d2s/zip
+    - name: Integrate SukiSU Ultra & Patch Configs
+      run: |
+        echo "=> 1. Tích hợp SukiSU Ultra (nhánh nongki)..."
+        curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s nongki
+        
+        echo "=> 2. Vá lỗi SELinux..."
+        sed -i 's/static const struct file_operations sel_write_op/const struct file_operations sel_write_op/' security/selinux/selinuxfs.c
+        echo 'EXPORT_SYMBOL(sel_write_op);' >> security/selinux/selinuxfs.c
+        sed -i 's/static const struct file_operations sel_handle_status_ops/const struct file_operations sel_handle_status_ops/' security/selinux/selinuxfs.c
+        echo 'EXPORT_SYMBOL(sel_handle_status_ops);' >> security/selinux/selinuxfs.c
+        sed -i 's/static int security_dump_masked_av/int security_dump_masked_av/' security/selinux/ss/services.c
+        echo 'EXPORT_SYMBOL(security_dump_masked_av);' >> security/selinux/ss/services.c
+        sed -i 's/static int context_struct_compute_av/int context_struct_compute_av/' security/selinux/ss/services.c
+        echo 'EXPORT_SYMBOL(context_struct_compute_av);' >> security/selinux/ss/services.c
+        
+        echo "=> 3. Tự động dò tìm file defconfig..."
+        DEFCONFIG_FILE=$(find arch/arm64/configs/ -name "*d2xks*defconfig" | head -n 1)
+        if [ -z "$DEFCONFIG_FILE" ]; then
+          echo "❌ Không tìm thấy file defconfig cho d2xks!"
+          exit 1
+        fi
+        DEFCONFIG_NAME=$(basename $DEFCONFIG_FILE)
+        echo "=> Sử dụng file: $DEFCONFIG_NAME"
+        
+        # Dọn dẹp config cũ để tránh trùng lặp
+        sed -i '/CONFIG_DEBUG_SNAPSHOT/d' $DEFCONFIG_FILE
+        sed -i '/CONFIG_EXYNOS_ADV_TRACER/d' $DEFCONFIG_FILE
+        sed -i '/CONFIG_EXYNOS_CPUHP/d' $DEFCONFIG_FILE
+        sed -i '/CONFIG_SCHED_FRT/d' $DEFCONFIG_FILE
+        sed -i '/CONFIG_KALLSYMS_ALL/d' $DEFCONFIG_FILE
+        sed -i '/CONFIG_KSU/d' $DEFCONFIG_FILE
+        
+        # Bơm config mới
+        cat >> $DEFCONFIG_FILE << 'EOF'
+        CONFIG_DEBUG_SNAPSHOT=y
+        CONFIG_EXYNOS_ADV_TRACER=y
+        CONFIG_EXYNOS_CPUHP=y
+        CONFIG_SCHED_FRT=y
+        CONFIG_RTC_LIB=y
+        CONFIG_LCD_CLASS_DEVICE=y
+        CONFIG_MALI_EXYNOS=y
+        CONFIG_KALLSYMS=y
+        CONFIG_KALLSYMS_ALL=y
+        CONFIG_KSU=y
+        CONFIG_KSU_MANUAL_HOOK=y
+        # CONFIG_KPROBES is not set
+        EOF
+        
+        export ARCH=arm64
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        export CC=aarch64-linux-gnu-gcc
+        make $DEFCONFIG_NAME
+        make olddefconfig
 
-  build_d2x:
-    needs: setup
-    runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.model == 'd2x' || needs.setup.outputs.should_build_all == 'true' }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
-      - name: Update submodules
-        run: |
-          git submodule update --init --recursive
-          git submodule update --remote
-      - name: Build for d2x
-        run: ./workflows.sh -m d2x -k Y -r N
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ExtremeKRNL-Nexus-d2x
-          path: build/out/d2x/zip
+    - name: Build Kernel (GCC)
+      run: |
+        export ARCH=arm64
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        export CC=aarch64-linux-gnu-gcc
+        make -j$(nproc)
 
-  # =========================================================================
-  # JOB DÀNH RIÊNG CHO D2XKS (NOTE 10+ 5G HÀN QUỐC) - BUILD THỦ CÔNG
-  # =========================================================================
-  build_d2xks:
-    needs: setup
-    runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.model == 'd2xks' || needs.setup.outputs.should_build_all == 'true' }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
-          
-      - name: Update submodules
-        run: |
-          git submodule update --init --recursive
-          git submodule update --remote
+    - name: Package Flashable Zip (AnyKernel3)
+      run: |
+        git clone https://github.com/osm0sis/AnyKernel3.git ak3
+        cd ak3
+        rm -rf .git
+        cp ../arch/arm64/boot/Image.gz .
+        zip -r9 ../ExtremeKRNL-Nexus-d2xks-SukiSU.zip *
 
-      - name: Install Dependencies (GCC)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev \
-          zip unzip python3 git wget curl cpio kmod rsync \
-          device-tree-compiler gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
-          automake libtool lzop gperf zlib1g-dev libxml2-utils bzip2 \
-          libbz2-dev squashfs-tools pngcrush schedtool dpkg-dev lz4
-
-      - name: Integrate SukiSU & Patch Configs
-        run: |
-          echo "=> 1. Tích hợp SukiSU Ultra..."
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s nongki
-          
-          echo "=> 2. Vá lỗi SELinux..."
-          sed -i 's/static const struct file_operations sel_write_op/const struct file_operations sel_write_op/' security/selinux/selinuxfs.c
-          echo 'EXPORT_SYMBOL(sel_write_op);' >> security/selinux/selinuxfs.c
-          sed -i 's/static const struct file_operations sel_handle_status_ops/const struct file_operations sel_handle_status_ops/' security/selinux/selinuxfs.c
-          echo 'EXPORT_SYMBOL(sel_handle_status_ops);' >> security/selinux/selinuxfs.c
-          sed -i 's/static int security_dump_masked_av/int security_dump_masked_av/' security/selinux/ss/services.c
-          echo 'EXPORT_SYMBOL(security_dump_masked_av);' >> security/selinux/ss/services.c
-          sed -i 's/static int context_struct_compute_av/int context_struct_compute_av/' security/selinux/ss/services.c
-          echo 'EXPORT_SYMBOL(context_struct_compute_av);' >> security/selinux/ss/services.c
-          
-          echo "=> 3. Tự động dò tìm file defconfig..."
-          # Tìm file có chứa d2xks hoặc d2x
-          DEFCONFIG_FILE=$(find arch/arm64/configs/ -name "*d2xks*defconfig" -o -name "*d2x*defconfig" | head -n 1)
-          if [ -z "$DEFCONFIG_FILE" ]; then
-            echo "Khong tim thay file defconfig cho d2xks/d2x!"
-            echo "Cac file hien co:"
-            ls arch/arm64/configs/
-            exit 1
-          fi
-          echo "=> Su dung file: $DEFCONFIG_FILE"
-          
-          # Lấy tên file không có đường dẫn
-          DEFCONFIG_NAME=$(basename $DEFCONFIG_FILE)
-          
-          # Xoa config cu
-          sed -i '/CONFIG_DEBUG_SNAPSHOT/d' $DEFCONFIG_FILE
-          sed -i '/CONFIG_EXYNOS_ADV_TRACER/d' $DEFCONFIG_FILE
-          sed -i '/CONFIG_EXYNOS_CPUHP/d' $DEFCONFIG_FILE
-          sed -i '/CONFIG_SCHED_FRT/d' $DEFCONFIG_FILE
-          sed -i '/CONFIG_KALLSYMS_ALL/d' $DEFCONFIG_FILE
-          sed -i '/CONFIG_KSU/d' $DEFCONFIG_FILE
-          
-          # Bơm config mới
-          cat >> $DEFCONFIG_FILE << 'EOF'
-          CONFIG_DEBUG_SNAPSHOT=y
-          CONFIG_EXYNOS_ADV_TRACER=y
-          CONFIG_EXYNOS_CPUHP=y
-          CONFIG_SCHED_FRT=y
-          CONFIG_RTC_LIB=y
-          CONFIG_LCD_CLASS_DEVICE=y
-          CONFIG_MALI_EXYNOS=y
-          CONFIG_KALLSYMS=y
-          CONFIG_KALLSYMS_ALL=y
-          CONFIG_KSU=y
-          CONFIG_KSU_MANUAL_HOOK=y
-          # CONFIG_KPROBES is not set
-          EOF
-          
-          # Tạo .config
-          export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CC=aarch64-linux-gnu-gcc
-          make $DEFCONFIG_NAME
-          make olddefconfig
-
-      - name: Build Kernel (GCC)
-        run: |
-          export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CC=aarch64-linux-gnu-gcc
-          make -j$(nproc)
-
-      - name: Package Flashable Zip (AnyKernel3)
-        run: |
-          git clone https://github.com/osm0sis/AnyKernel3.git ak3
-          cd ak3
-          rm -rf .git
-          cp ../arch/arm64/boot/Image.gz .
-          zip -r9 ../ExtremeKRNL-Nexus-d2xks-SukiSU.zip *
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ExtremeKRNL-Nexus-d2xks-SukiSU
-          path: ExtremeKRNL-Nexus-d2xks-SukiSU.zip
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ExtremeKRNL-Nexus-d2xks-SukiSU
+        path: ExtremeKRNL-Nexus-d2xks-SukiSU.zip
