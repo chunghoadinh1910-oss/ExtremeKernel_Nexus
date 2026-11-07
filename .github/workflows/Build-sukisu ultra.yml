@@ -17,9 +17,7 @@ jobs:
       run: |
         git submodule update --init --recursive
         git submodule update --remote
-        # Cấp quyền thực thi cho tất cả các script
         chmod +x scripts/config
-        chmod +x scripts/*.sh 2>/dev/null || true
         find scripts -type f -name "*.sh" -exec chmod +x {} \;
 
     - name: Install Dependencies
@@ -28,6 +26,7 @@ jobs:
         sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev \
         zip unzip python3 git wget curl cpio kmod rsync \
         device-tree-compiler gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+        gcc-arm-linux-gnueabi \
         automake libtool lzop gperf zlib1g-dev libxml2-utils bzip2 \
         libbz2-dev squashfs-tools pngcrush schedtool dpkg-dev lz4
 
@@ -86,6 +85,7 @@ jobs:
       run: |
         export ARCH=arm64
         export CROSS_COMPILE=aarch64-linux-gnu-
+        export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
         export CC=aarch64-linux-gnu-gcc
         export KBUILD_NOCMDDEP=1
         make -j$(nproc)
