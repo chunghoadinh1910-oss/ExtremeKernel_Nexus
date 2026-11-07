@@ -45,7 +45,7 @@ jobs:
         sed -i 's/static int context_struct_compute_av/int context_struct_compute_av/' security/selinux/ss/services.c
         echo 'EXPORT_SYMBOL(context_struct_compute_av);' >> security/selinux/ss/services.c
         
-        echo "=> 3. Vá lỗi need_memory_boosting (Lỗi always_inline)..."
+        echo "=> 3. Vá lỗi need_memory_boosting..."
         sed -i 's/extern inline bool need_memory_boosting(struct pglist_data \*pgdat);/extern inline bool need_memory_boosting(struct pglist_data *pgdat) { return false; }/' include/linux/mm.h
 
         echo "=> 4. Tạo file .config từ base defconfig..."
@@ -91,7 +91,8 @@ jobs:
         export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
         export CC=aarch64-linux-gnu-gcc
         export KBUILD_NOCMDDEP=1
-        make -j$(nproc)
+        # Giảm số luồng xuống -j2 để tránh tràn RAM
+        make -j2
 
     - name: Package Flashable Zip (AnyKernel3)
       run: |
