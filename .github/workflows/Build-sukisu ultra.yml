@@ -29,6 +29,7 @@ jobs:
       - name: Set should_build_all output
         run: echo "should_build_all=${{ github.event.inputs.model == 'all' }}" >> $GITHUB_OUTPUT
 
+  # ... (Giữ nguyên các job build_d1, build_d1xks, build_d2s, build_d2x) ...
   build_d1:
     needs: setup
     runs-on: ubuntu-latest
@@ -111,7 +112,7 @@ jobs:
           path: build/out/d2x/zip
 
   # =========================================================================
-  # JOB DÀNH RIÊNG CHO D2XKS (NOTE 10+ 5G HÀN QUỐC) - BUILD THỦ CÔNG BẰNG GCC
+  # JOB DÀNH RIÊNG CHO D2XKS (NOTE 10+ 5G HÀN QUỐC) - BUILD THỦ CÔNG
   # =========================================================================
   build_d2xks:
     needs: setup
@@ -138,7 +139,7 @@ jobs:
 
       - name: Integrate SukiSU & Patch Configs
         run: |
-          echo "=> 1. Tích hợp SukiSU Ultra (nhánh nongki)..."
+          echo "=> 1. Tích hợp SukiSU Ultra..."
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s nongki
           
           echo "=> 2. Vá lỗi SELinux..."
@@ -151,19 +152,30 @@ jobs:
           sed -i 's/static int context_struct_compute_av/int context_struct_compute_av/' security/selinux/ss/services.c
           echo 'EXPORT_SYMBOL(context_struct_compute_av);' >> security/selinux/ss/services.c
           
-          echo "=> 3. Cấu hình driver..."
-          DEFCONFIG_FILE="exynos9820-d2xks_defconfig"
+          echo "=> 3. Tự động dò tìm file defconfig..."
+          # Tìm file có chứa d2xks hoặc d2x
+          DEFCONFIG_FILE=$(find arch/arm64/configs/ -name "*d2xks*defconfig" -o -name "*d2x*defconfig" | head -n 1)
+          if [ -z "$DEFCONFIG_FILE" ]; then
+            echo "Khong tim thay file defconfig cho d2xks/d2x!"
+            echo "Cac file hien co:"
+            ls arch/arm64/configs/
+            exit 1
+          fi
+          echo "=> Su dung file: $DEFCONFIG_FILE"
           
-          # Xóa các config cũ nếu có để tránh trùng lặp
-          sed -i '/CONFIG_DEBUG_SNAPSHOT/d' arch/arm64/configs/$DEFCONFIG_FILE
-          sed -i '/CONFIG_EXYNOS_ADV_TRACER/d' arch/arm64/configs/$DEFCONFIG_FILE
-          sed -i '/CONFIG_EXYNOS_CPUHP/d' arch/arm64/configs/$DEFCONFIG_FILE
-          sed -i '/CONFIG_SCHED_FRT/d' arch/arm64/configs/$DEFCONFIG_FILE
-          sed -i '/CONFIG_KALLSYMS_ALL/d' arch/arm64/configs/$DEFCONFIG_FILE
-          sed -i '/CONFIG_KSU/d' arch/arm64/configs/$DEFCONFIG_FILE
+          # Lấy tên file không có đường dẫn
+          DEFCONFIG_NAME=$(basename $DEFCONFIG_FILE)
+          
+          # Xoa config cu
+          sed -i '/CONFIG_DEBUG_SNAPSHOT/d' $DEFCONFIG_FILE
+          sed -i '/CONFIG_EXYNOS_ADV_TRACER/d' $DEFCONFIG_FILE
+          sed -i '/CONFIG_EXYNOS_CPUHP/d' $DEFCONFIG_FILE
+          sed -i '/CONFIG_SCHED_FRT/d' $DEFCONFIG_FILE
+          sed -i '/CONFIG_KALLSYMS_ALL/d' $DEFCONFIG_FILE
+          sed -i '/CONFIG_KSU/d' $DEFCONFIG_FILE
           
           # Bơm config mới
-          cat >> arch/arm64/configs/$DEFCONFIG_FILE << 'EOF'
+          cat >> $DEFCONFIG_FILE << 'EOF'
           CONFIG_DEBUG_SNAPSHOT=y
           CONFIG_EXYNOS_ADV_TRACER=y
           CONFIG_EXYNOS_CPUHP=y
@@ -182,7 +194,7 @@ jobs:
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CC=aarch64-linux-gnu-gcc
-          make $DEFCONFIG_FILE
+          make $DEFCONFIG_NAME
           make olddefconfig
 
       - name: Build Kernel (GCC)
