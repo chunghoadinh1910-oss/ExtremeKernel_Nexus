@@ -1,7 +1,7 @@
 name: Kernel Build - SukiSU Ultra (D2XKS)
 
 on:
-  workflow_dispatch: # Cho phép bạn bấm chạy thủ công
+  workflow_dispatch:
 
 jobs:
   build:
@@ -29,8 +29,9 @@ jobs:
 
     - name: Integrate SukiSU Ultra & Patch Configs
       run: |
-        echo "=> 1. Tích hợp SukiSU Ultra (nhánh nongki)..."
-        curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s nongki
+        echo "=> 1. Tích hợp SukiSU Ultra (nhánh builtin - hỗ trợ non-GKI)..."
+        # Sử dụng nhánh 'builtin' thay vì 'nongki' đã lỗi thời
+        curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s builtin
         
         echo "=> 2. Vá lỗi SELinux..."
         sed -i 's/static const struct file_operations sel_write_op/const struct file_operations sel_write_op/' security/selinux/selinuxfs.c
@@ -42,25 +43,25 @@ jobs:
         sed -i 's/static int context_struct_compute_av/int context_struct_compute_av/' security/selinux/ss/services.c
         echo 'EXPORT_SYMBOL(context_struct_compute_av);' >> security/selinux/ss/services.c
         
-        echo "=> 3. Tự động dò tìm file defconfig..."
-        DEFCONFIG_FILE=$(find arch/arm64/configs/ -name "*d2xks*defconfig" | head -n 1)
-        if [ -z "$DEFCONFIG_FILE" ]; then
-          echo "❌ Không tìm thấy file defconfig cho d2xks!"
+        echo "=> 3. Tìm file cấu hình d2xks.config..."
+        # Sửa lệnh tìm kiếm cho đúng định dạng file thực tế
+        CONFIG_FILE=$(find arch/arm64/configs/ -name "d2xks.config" | head -n 1)
+        if [ -z "$CONFIG_FILE" ]; then
+          echo "❌ Không tìm thấy file d2xks.config!"
           exit 1
         fi
-        DEFCONFIG_NAME=$(basename $DEFCONFIG_FILE)
-        echo "=> Sử dụng file: $DEFCONFIG_NAME"
+        echo "=> Sử dụng file: $CONFIG_FILE"
         
-        # Dọn dẹp config cũ để tránh trùng lặp
-        sed -i '/CONFIG_DEBUG_SNAPSHOT/d' $DEFCONFIG_FILE
-        sed -i '/CONFIG_EXYNOS_ADV_TRACER/d' $DEFCONFIG_FILE
-        sed -i '/CONFIG_EXYNOS_CPUHP/d' $DEFCONFIG_FILE
-        sed -i '/CONFIG_SCHED_FRT/d' $DEFCONFIG_FILE
-        sed -i '/CONFIG_KALLSYMS_ALL/d' $DEFCONFIG_FILE
-        sed -i '/CONFIG_KSU/d' $DEFCONFIG_FILE
+        # Dọn dẹp config cũ (nếu có) để tránh trùng lặp
+        sed -i '/CONFIG_DEBUG_SNAPSHOT/d' $CONFIG_FILE
+        sed -i '/CONFIG_EXYNOS_ADV_TRACER/d' $CONFIG_FILE
+        sed -i '/CONFIG_EXYNOS_CPUHP/d' $CONFIG_FILE
+        sed -i '/CONFIG_SCHED_FRT/d' $CONFIG_FILE
+        sed -i '/CONFIG_KALLSYMS_ALL/d' $CONFIG_FILE
+        sed -i '/CONFIG_KSU/d' $CONFIG_FILE
         
-        # Bơm config mới
-        cat >> $DEFCONFIG_FILE << 'EOF'
+        # Bơm config mới cho SukiSU Ultra
+        cat >> $CONFIG_FILE << 'EOF'
         CONFIG_DEBUG_SNAPSHOT=y
         CONFIG_EXYNOS_ADV_TRACER=y
         CONFIG_EXYNOS_CPUHP=y
@@ -75,10 +76,11 @@ jobs:
         # CONFIG_KPROBES is not set
         EOF
         
+        # Tạo .config từ file cấu hình
         export ARCH=arm64
         export CROSS_COMPILE=aarch64-linux-gnu-
         export CC=aarch64-linux-gnu-gcc
-        make $DEFCONFIG_NAME
+        make d2xks.config
         make olddefconfig
 
     - name: Build Kernel (GCC)
