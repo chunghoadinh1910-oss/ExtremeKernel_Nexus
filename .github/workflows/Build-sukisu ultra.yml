@@ -13,10 +13,14 @@ jobs:
       with:
         submodules: 'recursive'
 
-    - name: Update submodules
+    - name: Update submodules & Fix permissions
       run: |
         git submodule update --init --recursive
         git submodule update --remote
+        # Cấp quyền thực thi cho tất cả các script
+        chmod +x scripts/config
+        chmod +x scripts/*.sh 2>/dev/null || true
+        find scripts -type f -name "*.sh" -exec chmod +x {} \;
 
     - name: Install Dependencies
       run: |
@@ -43,7 +47,6 @@ jobs:
         echo 'EXPORT_SYMBOL(context_struct_compute_av);' >> security/selinux/ss/services.c
         
         echo "=> 3. Tạo file .config từ base defconfig..."
-        # Tìm base defconfig (exynos9820_defconfig)
         BASE_DEFCONFIG=$(find arch/arm64/configs/ -name "exynos9820_defconfig" | head -n 1)
         if [ -z "$BASE_DEFCONFIG" ]; then
           echo "❌ Không tìm thấy file exynos9820_defconfig!"
@@ -55,16 +58,13 @@ jobs:
         export CROSS_COMPILE=aarch64-linux-gnu-
         export CC=aarch64-linux-gnu-gcc
         
-        # Tạo .config từ defconfig gốc
         make $(basename $BASE_DEFCONFIG)
         
         echo "=> 4. Merge d2xks.config và bơm CONFIG SukiSU..."
-        # Gộp file fragment d2xks.config vào .config
         if [ -f "arch/arm64/configs/d2xks.config" ]; then
             cat arch/arm64/configs/d2xks.config >> .config
         fi
         
-        # Bơm config cho SukiSU Ultra và driver
         cat >> .config << 'EOF'
         CONFIG_DEBUG_SNAPSHOT=y
         CONFIG_EXYNOS_ADV_TRACER=y
@@ -80,7 +80,6 @@ jobs:
         # CONFIG_KPROBES is not set
         EOF
         
-        # Cập nhật lại cấu hình để đảm bảo tính nhất quán
         make olddefconfig
 
     - name: Build Kernel (GCC)
@@ -88,6 +87,7 @@ jobs:
         export ARCH=arm64
         export CROSS_COMPILE=aarch64-linux-gnu-
         export CC=aarch64-linux-gnu-gcc
+        export KBUILD_NOCMDDEP=1
         make -j$(nproc)
 
     - name: Package Flashable Zip (AnyKernel3)
