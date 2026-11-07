@@ -45,7 +45,10 @@ jobs:
         sed -i 's/static int context_struct_compute_av/int context_struct_compute_av/' security/selinux/ss/services.c
         echo 'EXPORT_SYMBOL(context_struct_compute_av);' >> security/selinux/ss/services.c
         
-        echo "=> 3. Tạo file .config từ base defconfig..."
+        echo "=> 3. Vá lỗi need_memory_boosting (Lỗi always_inline)..."
+        sed -i 's/extern inline bool need_memory_boosting(struct pglist_data \*pgdat);/extern inline bool need_memory_boosting(struct pglist_data *pgdat) { return false; }/' include/linux/mm.h
+
+        echo "=> 4. Tạo file .config từ base defconfig..."
         BASE_DEFCONFIG=$(find arch/arm64/configs/ -name "exynos9820_defconfig" | head -n 1)
         if [ -z "$BASE_DEFCONFIG" ]; then
           echo "❌ Không tìm thấy file exynos9820_defconfig!"
@@ -59,7 +62,7 @@ jobs:
         
         make $(basename $BASE_DEFCONFIG)
         
-        echo "=> 4. Merge d2xks.config và bơm CONFIG SukiSU..."
+        echo "=> 5. Merge d2xks.config và bơm CONFIG SukiSU..."
         if [ -f "arch/arm64/configs/d2xks.config" ]; then
             cat arch/arm64/configs/d2xks.config >> .config
         fi
