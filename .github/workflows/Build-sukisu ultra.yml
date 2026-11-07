@@ -111,7 +111,7 @@ jobs:
           path: build/out/d2x/zip
 
   # =========================================================================
-  # JOB DÀNH RIÊNG CHO D2XKS (NOTE 10+ 5G HÀN QUỐC) - TÍCH HỢP SUKISU ULTRA
+  # JOB DÀNH RIÊNG CHO D2XKS (NOTE 10+ 5G HÀN QUỐC) - BUILD THỦ CÔNG BẰNG GCC
   # =========================================================================
   build_d2xks:
     needs: setup
@@ -127,9 +127,18 @@ jobs:
           git submodule update --init --recursive
           git submodule update --remote
 
-      - name: Integrate SukiSU Ultra & Patch Configs
+      - name: Install Dependencies (GCC)
         run: |
-          echo "=> 1. Tích hợp SukiSU Ultra..."
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev \
+          zip unzip python3 git wget curl cpio kmod rsync \
+          device-tree-compiler gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+          automake libtool lzop gperf zlib1g-dev libxml2-utils bzip2 \
+          libbz2-dev squashfs-tools pngcrush schedtool dpkg-dev lz4
+
+      - name: Integrate SukiSU & Patch Configs
+        run: |
+          echo "=> 1. Tích hợp SukiSU Ultra (nhánh nongki)..."
           curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s nongki
           
           echo "=> 2. Vá lỗi SELinux..."
@@ -142,8 +151,18 @@ jobs:
           sed -i 's/static int context_struct_compute_av/int context_struct_compute_av/' security/selinux/ss/services.c
           echo 'EXPORT_SYMBOL(context_struct_compute_av);' >> security/selinux/ss/services.c
           
-          echo "=> 3. Bơm CONFIG driver vào defconfig..."
+          echo "=> 3. Cấu hình driver..."
           DEFCONFIG_FILE="exynos9820-d2xks_defconfig"
+          
+          # Xóa các config cũ nếu có để tránh trùng lặp
+          sed -i '/CONFIG_DEBUG_SNAPSHOT/d' arch/arm64/configs/$DEFCONFIG_FILE
+          sed -i '/CONFIG_EXYNOS_ADV_TRACER/d' arch/arm64/configs/$DEFCONFIG_FILE
+          sed -i '/CONFIG_EXYNOS_CPUHP/d' arch/arm64/configs/$DEFCONFIG_FILE
+          sed -i '/CONFIG_SCHED_FRT/d' arch/arm64/configs/$DEFCONFIG_FILE
+          sed -i '/CONFIG_KALLSYMS_ALL/d' arch/arm64/configs/$DEFCONFIG_FILE
+          sed -i '/CONFIG_KSU/d' arch/arm64/configs/$DEFCONFIG_FILE
+          
+          # Bơm config mới
           cat >> arch/arm64/configs/$DEFCONFIG_FILE << 'EOF'
           CONFIG_DEBUG_SNAPSHOT=y
           CONFIG_EXYNOS_ADV_TRACER=y
@@ -158,13 +177,31 @@ jobs:
           CONFIG_KSU_MANUAL_HOOK=y
           # CONFIG_KPROBES is not set
           EOF
+          
+          # Tạo .config
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CC=aarch64-linux-gnu-gcc
+          make $DEFCONFIG_FILE
+          make olddefconfig
 
-      - name: Build for d2xks with SukiSU
-        # Đổi -k Y thành -k N để tắt KSU Next mặc định, tránh xung đột với SukiSU
-        run: ./workflows.sh -m d2xks -k N -r N
+      - name: Build Kernel (GCC)
+        run: |
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CC=aarch64-linux-gnu-gcc
+          make -j$(nproc)
+
+      - name: Package Flashable Zip (AnyKernel3)
+        run: |
+          git clone https://github.com/osm0sis/AnyKernel3.git ak3
+          cd ak3
+          rm -rf .git
+          cp ../arch/arm64/boot/Image.gz .
+          zip -r9 ../ExtremeKRNL-Nexus-d2xks-SukiSU.zip *
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ExtremeKRNL-Nexus-d2xks-SukiSU
-          path: build/out/d2xks/zip
+          path: ExtremeKRNL-Nexus-d2xks-SukiSU.zip
