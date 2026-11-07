@@ -29,8 +29,7 @@ jobs:
 
     - name: Integrate SukiSU Ultra & Patch Configs
       run: |
-        echo "=> 1. Tích hợp SukiSU Ultra (nhánh builtin - hỗ trợ non-GKI)..."
-        # Sử dụng nhánh 'builtin' thay vì 'nongki' đã lỗi thời
+        echo "=> 1. Tích hợp SukiSU Ultra (nhánh builtin)..."
         curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s builtin
         
         echo "=> 2. Vá lỗi SELinux..."
@@ -43,25 +42,30 @@ jobs:
         sed -i 's/static int context_struct_compute_av/int context_struct_compute_av/' security/selinux/ss/services.c
         echo 'EXPORT_SYMBOL(context_struct_compute_av);' >> security/selinux/ss/services.c
         
-        echo "=> 3. Tìm file cấu hình d2xks.config..."
-        # Sửa lệnh tìm kiếm cho đúng định dạng file thực tế
-        CONFIG_FILE=$(find arch/arm64/configs/ -name "d2xks.config" | head -n 1)
-        if [ -z "$CONFIG_FILE" ]; then
-          echo "❌ Không tìm thấy file d2xks.config!"
+        echo "=> 3. Tạo file .config từ base defconfig..."
+        # Tìm base defconfig (exynos9820_defconfig)
+        BASE_DEFCONFIG=$(find arch/arm64/configs/ -name "exynos9820_defconfig" | head -n 1)
+        if [ -z "$BASE_DEFCONFIG" ]; then
+          echo "❌ Không tìm thấy file exynos9820_defconfig!"
           exit 1
         fi
-        echo "=> Sử dụng file: $CONFIG_FILE"
+        echo "=> Sử dụng base: $BASE_DEFCONFIG"
         
-        # Dọn dẹp config cũ (nếu có) để tránh trùng lặp
-        sed -i '/CONFIG_DEBUG_SNAPSHOT/d' $CONFIG_FILE
-        sed -i '/CONFIG_EXYNOS_ADV_TRACER/d' $CONFIG_FILE
-        sed -i '/CONFIG_EXYNOS_CPUHP/d' $CONFIG_FILE
-        sed -i '/CONFIG_SCHED_FRT/d' $CONFIG_FILE
-        sed -i '/CONFIG_KALLSYMS_ALL/d' $CONFIG_FILE
-        sed -i '/CONFIG_KSU/d' $CONFIG_FILE
+        export ARCH=arm64
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        export CC=aarch64-linux-gnu-gcc
         
-        # Bơm config mới cho SukiSU Ultra
-        cat >> $CONFIG_FILE << 'EOF'
+        # Tạo .config từ defconfig gốc
+        make $(basename $BASE_DEFCONFIG)
+        
+        echo "=> 4. Merge d2xks.config và bơm CONFIG SukiSU..."
+        # Gộp file fragment d2xks.config vào .config
+        if [ -f "arch/arm64/configs/d2xks.config" ]; then
+            cat arch/arm64/configs/d2xks.config >> .config
+        fi
+        
+        # Bơm config cho SukiSU Ultra và driver
+        cat >> .config << 'EOF'
         CONFIG_DEBUG_SNAPSHOT=y
         CONFIG_EXYNOS_ADV_TRACER=y
         CONFIG_EXYNOS_CPUHP=y
@@ -76,11 +80,7 @@ jobs:
         # CONFIG_KPROBES is not set
         EOF
         
-        # Tạo .config từ file cấu hình
-        export ARCH=arm64
-        export CROSS_COMPILE=aarch64-linux-gnu-
-        export CC=aarch64-linux-gnu-gcc
-        make d2xks.config
+        # Cập nhật lại cấu hình để đảm bảo tính nhất quán
         make olddefconfig
 
     - name: Build Kernel (GCC)
